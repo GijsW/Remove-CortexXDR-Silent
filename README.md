@@ -1,4 +1,4 @@
-# Remove-CortexXDR_Silent.ps1 - README
+# Remove-CortexXDR-Silent - README
  Silently uninstalls Cortex XDR (and Traps) with advanced cleanup and logging.
 
 ## Overview
@@ -38,10 +38,10 @@ This script is made available **as-is**, without warranty of any kind, under the
 
 ```powershell
 # Basic usage (uses the default password and default log file):
-.\Remove-CortexXDR_Silent.ps1
+.\remove-cortex_silent.ps1
 
 # With a custom password and custom log file:
-.\Remove-CortexXDR_Silent.ps1 -CortexUninstallPassword "MyPassword123" -LogFile "C:\Logs\XDR_Uninstall.log"
+.\remove-cortex_silent.ps1 -CortexUninstallPassword "<password>" -LogFile "C:\Logs\XDR_Uninstall.log"
 ```
 
 ### Parameters
