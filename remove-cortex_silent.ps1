@@ -33,23 +33,31 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory=$false)]
-    [string]$CortexUninstallPassword = "",
+    [ValidateNotNullOrEmpty()]
+    [SecureString]$CortexUninstallPassword,
 
     [Parameter(Mandatory=$false)]
+    [ValidateNotNullOrEmpty()]
     [string]$LogFile = "C:\Temp\CortexXDRUninstall.log",
 
     [Parameter(Mandatory=$false)]
     [switch]$VerboseOutput
 )
 
+# Check if running on Windows
+if ($PSVersionTable.Platform -ne "Win32NT") {
+    Write-Error "This script can only be run on Windows systems."
+    exit 1
+}
+
 # Ensure the log directory exists
 try {
     $logDir = Split-Path -Path $LogFile -Parent
     if (-not (Test-Path $logDir)) {
-        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        New-Item -ItemType Directory -Path $logDir -Force -ErrorAction Stop | Out-Null
     }
 } catch {
-    # Since this script is silent, exit on error without writing to console.
+    Write-Error "Failed to create log directory: $($_.Exception.Message)"
     exit 1
 }
 
@@ -59,32 +67,53 @@ function Write-Log {
         [Parameter(Mandatory=$true)]
         [string]$Message,
         [Parameter(Mandatory=$false)]
+        [ValidateSet("INFO", "WARN", "ERROR", "DEBUG")]
         [string]$Level = "INFO"
     )
 
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logEntry = "[${timestamp}] [$Level] $Message"
-    Add-Content -Path $LogFile -Value $logEntry
+    try {
+        $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        $logEntry = "[${timestamp}] [$Level] $Message"
+        Add-Content -Path $LogFile -Value $logEntry -ErrorAction Stop
 
-    # If verbose is set, include a secondary verbose entry in the same log
-    if ($VerboseOutput) {
-        Add-Content -Path $LogFile -Value "[VERBOSE] $Message"
+        if ($VerboseOutput) {
+            Add-Content -Path $LogFile -Value "[VERBOSE] $Message" -ErrorAction Stop
+        }
+    } catch {
+        Write-Error "Failed to write to log file: $($_.Exception.Message)"
     }
 }
 
 # Verify script is running as Administrator
-if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")) {
-    Write-Log "Script must be run as Administrator." "ERROR"
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")
+if (-not $isAdmin) {
+    Write-Error "This script must be run as Administrator. Please restart PowerShell as Administrator and try again."
     exit 2
 }
 
 # Set default uninstall password if not provided
-if ([string]::IsNullOrEmpty($CortexUninstallPassword)) {
-    $CortexUninstallPassword = "DefaultXDRPassword"
-    Write-Log "No uninstall password provided; using default password: $CortexUninstallPassword" "WARN"
+if (-not $CortexUninstallPassword) {
+    $secureDefault = ConvertTo-SecureString "DefaultXDRPassword" -AsPlainText -Force
+    $CortexUninstallPassword = $secureDefault
+    Write-Log "No uninstall password provided; using default password" "WARN"
 }
 
 Write-Log "=== Initiating Silent Cortex XDR Removal ==="
+
+# Function to safely convert SecureString to plain text
+function Convert-SecureStringToPlainText {
+    param([SecureString]$SecureString)
+    try {
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
+        $plainText = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        return $plainText
+    }
+    finally {
+        if ($BSTR) {
+            [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
+        }
+    }
+}
 
 # Checks if Cortex XDR / Traps is installed
 function Test-CortexXDRPresent {
@@ -97,7 +126,7 @@ function Test-CortexXDRPresent {
 
     foreach ($path in $uninstallPaths) {
         try {
-            $found = Get-ItemProperty $path -ErrorAction SilentlyContinue |
+            $found = Get-ItemProperty $path -ErrorAction Stop |
                 Where-Object {
                     $_.DisplayName -like "*Cortex XDR*" -or
                     $_.DisplayName -like "*Traps*"
@@ -107,19 +136,20 @@ function Test-CortexXDRPresent {
                 return $true
             }
         } catch {
-            Write-Log "Error reading $path`:" $($_.Exception.Message) "ERROR"
+            Write-Log "Error reading $path`: $($_.Exception.Message)" "ERROR"
         }
     }
 
     $services = @("Cyvera", "Traps", "CortexXDR", "CybAgent", "CyveraService", "CyveraMonitor", "Cyserver")
     foreach ($svc in $services) {
         try {
-            if (Get-Service -Name $svc -ErrorAction SilentlyContinue) {
+            if (Get-Service -Name $svc -ErrorAction Stop) {
                 Write-Log "XDR/Traps-related service found: $svc" "DEBUG"
                 return $true
             }
         } catch {
             # Ignore if service not found
+            continue
         }
     }
     return $false
@@ -128,10 +158,12 @@ function Test-CortexXDRPresent {
 # Uninstalls Cortex XDR (and Traps) silently
 function Uninstall-CortexXDR {
     param(
-        [string]$UninstallPassword
+        [SecureString]$UninstallPassword
     )
 
     Write-Log "Starting silent uninstall using registry entries..."
+
+    $plainPassword = Convert-SecureStringToPlainText -SecureString $UninstallPassword
 
     $uninstallPaths = @(
         "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
@@ -142,7 +174,7 @@ function Uninstall-CortexXDR {
 
     foreach ($path in $uninstallPaths) {
         try {
-            $items = Get-ItemProperty $path -ErrorAction SilentlyContinue | Where-Object {
+            $items = Get-ItemProperty $path -ErrorAction Stop | Where-Object {
                 $_.DisplayName -like "*Cortex XDR*" -or $_.DisplayName -like "*Traps*"
             }
 
@@ -156,20 +188,20 @@ function Uninstall-CortexXDR {
 
                 try {
                     if ($quietUninstallString) {
-                        Write-Log "Executing QuietUninstallString: $quietUninstallString" "DEBUG"
+                        Write-Log "Executing QuietUninstallString" "DEBUG"
                         Start-Process cmd.exe -ArgumentList "/c $quietUninstallString /qn" -Wait -NoNewWindow
                     }
                     elseif ($uninstallString) {
-                        Write-Log "Executing UninstallString with password: $uninstallString" "DEBUG"
-                        Start-Process cmd.exe -ArgumentList "/c `"$uninstallString /qn UNINSTALL_PASSWORD=$UninstallPassword`"" -Wait -NoNewWindow
+                        Write-Log "Executing UninstallString" "DEBUG"
+                        Start-Process cmd.exe -ArgumentList "/c `"$uninstallString /qn UNINSTALL_PASSWORD=$plainPassword`"" -Wait -NoNewWindow
                     }
                     Write-Log "Silent uninstall command executed for $displayName."
                 } catch {
-                    Write-Log "Failed uninstall for $displayName`:" $($_.Exception.Message) "ERROR"
+                    Write-Log "Failed uninstall for $displayName`: $($_.Exception.Message)" "ERROR"
                 }
             }
         } catch {
-            Write-Log "Error enumerating $path`:" $($_.Exception.Message) "ERROR"
+            Write-Log "Error enumerating $path`: $($_.Exception.Message)" "ERROR"
         }
     }
 
@@ -277,34 +309,39 @@ function Test-CortexXDRRemoval {
 }
 
 # Main script execution
-Write-Log "Checking for Cortex XDR presence..."
-$XdrPresent = Test-CortexXDRPresent
+try {
+    Write-Log "Checking for Cortex XDR presence..."
+    $XdrPresent = Test-CortexXDRPresent
 
-if ($XdrPresent) {
-    Write-Log "Cortex XDR/Traps detected; proceeding with uninstall..."
+    if ($XdrPresent) {
+        Write-Log "Cortex XDR/Traps detected; proceeding with uninstall..."
 
-    # Attempt uninstall
-    Uninstall-CortexXDR -UninstallPassword $CortexUninstallPassword
+        # Attempt uninstall
+        Uninstall-CortexXDR -UninstallPassword $CortexUninstallPassword
 
-    Start-Sleep -Seconds 5
+        Start-Sleep -Seconds 5
 
-    # If still present, perform advanced cleanup
-    if (Test-CortexXDRPresent) {
-        Write-Log "Still detected; proceeding with cleanup..."
-        Remove-CortexXDRRemnants
-    }
+        # If still present, perform advanced cleanup
+        if (Test-CortexXDRPresent) {
+            Write-Log "Still detected; proceeding with cleanup..."
+            Remove-CortexXDRRemnants
+        }
 
-    Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 3
 
-    # Final verification
-    if (Test-CortexXDRRemoval) {
-        Write-Log "Removal verified. Script complete."
-        exit 0
+        # Final verification
+        if (Test-CortexXDRRemoval) {
+            Write-Log "Removal verified. Script complete."
+            exit 0
+        } else {
+            Write-Log "Warning: XDR may still be present. Manual intervention needed." "WARN"
+            exit 3
+        }
     } else {
-        Write-Log "Warning: XDR may still be present. Manual intervention needed." "WARN"
-        exit 3
+        Write-Log "Cortex XDR is not present. Script complete."
+        exit 0
     }
-} else {
-    Write-Log "Cortex XDR is not present. Script complete."
-    exit 0
+} catch {
+    Write-Log "Unexpected error occurred: $($_.Exception.Message)" "ERROR"
+    exit 1
 }
