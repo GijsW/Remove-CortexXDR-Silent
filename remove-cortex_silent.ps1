@@ -73,8 +73,7 @@ function Write-Log {
 }
 
 # Verify script is running as Administrator
-if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent())
-    .IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")) {
     Write-Log "Script must be run as Administrator." "ERROR"
     exit 2
 }
@@ -108,7 +107,7 @@ function Test-CortexXDRPresent {
                 return $true
             }
         } catch {
-            Write-Log "Error reading $path: $($_.Exception.Message)" "ERROR"
+            Write-Log "Error reading $path`:" $($_.Exception.Message) "ERROR"
         }
     }
 
@@ -166,11 +165,11 @@ function Uninstall-CortexXDR {
                     }
                     Write-Log "Silent uninstall command executed for $displayName."
                 } catch {
-                    Write-Log "Failed uninstall for $displayName: $($_.Exception.Message)" "ERROR"
+                    Write-Log "Failed uninstall for $displayName`:" $($_.Exception.Message) "ERROR"
                 }
             }
         } catch {
-            Write-Log "Error enumerating $path: $($_.Exception.Message)" "ERROR"
+            Write-Log "Error enumerating $path`:" $($_.Exception.Message) "ERROR"
         }
     }
 
@@ -219,7 +218,7 @@ function Remove-CortexXDRRemnants {
                 Write-Log "Terminated: $proc"
             }
         } catch {
-            Write-Log "Could not terminate $proc: $($_.Exception.Message)" "ERROR"
+            Write-Log "Could not terminate $proc`:" $($_.Exception.Message) "ERROR"
         }
     }
 
@@ -238,7 +237,7 @@ function Remove-CortexXDRRemnants {
                 Remove-Item -Path $rPath -Recurse -Force -ErrorAction Stop
                 Write-Log "Removed registry key: $rPath"
             } catch {
-                Write-Log "Failed to remove $rPath: $($_.Exception.Message)" "ERROR"
+                Write-Log "Failed to remove $rPath`:" $($_.Exception.Message) "ERROR"
             }
         }
     }
@@ -258,7 +257,7 @@ function Remove-CortexXDRRemnants {
                 Remove-Item -Path $dir -Recurse -Force -ErrorAction Stop
                 Write-Log "Removed directory: $dir"
             } catch {
-                Write-Log "Failed to remove $dir: $($_.Exception.Message)" "ERROR"
+                Write-Log "Failed to remove $dir`:" $($_.Exception.Message) "ERROR"
             }
         }
     }
