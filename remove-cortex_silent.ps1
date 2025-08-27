@@ -44,11 +44,24 @@ param(
     [switch]$VerboseOutput
 )
 
-# Check if running on Windows
-if ($PSVersionTable.Platform -ne "Win32NT") {
-    Write-Error "This script can only be run on Windows systems."
+# Check if running on Windows (cross-version check PS 5.1/PS 7+)
+$onWindows = $false
+try {
+    if (Get-Variable -Name IsWindows -Scope Global -ErrorAction SilentlyContinue) {
+        $onWindows = $IsWindows
+    } else {
+        # Fallbacks for older hosts
+        $onWindows = ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT)
+    }
+} catch {
+    $onWindows = $false
+}
+
+if (-not $onWindows) {
+    Write-Log "This script can only be run Windows systems." "ERROR"
     exit 1
 }
+
 
 # Ensure the log directory exists
 try {
